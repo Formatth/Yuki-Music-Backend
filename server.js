@@ -1,10 +1,26 @@
 const express = require('express');
+const cors = require('cors');
 const { home, charts, search, suggest, next, related, browse, song } = require('./lib/ytm');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const cache = new Map();
+
 app.disable('x-powered-by');
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    const allowed = [
+      'https://yuki-music-pwa.vercel.app',
+      'http://localhost:5173',
+      'http://localhost:4173'
+    ];
+    callback(null, allowed.includes(origin));
+  },
+  methods: ['GET', 'HEAD', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  maxAge: 86400
+}));
 app.use(express.json({ limit: '1mb' }));
 
 async function cached(key, ttl, fn) {
@@ -13,8 +29,8 @@ async function cached(key, ttl, fn) {
   const value = await fn(); cache.set(key, { value, time: Date.now() }); return value;
 }
 
-app.get('/', (_req, res) => res.json({ name: 'Yuki Music Backend', status: 'online', version: '0.3.0' }));
-app.get('/api/health', (_req, res) => res.json({ ok: true, name: 'Yuki Music Backend', version: '0.3.0' }));
+app.get('/', (_req, res) => res.json({ name: 'Yuki Music Backend', status: 'online', version: '0.3.1' }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, name: 'Yuki Music Backend', version: '0.3.1', cors: true }));
 app.get('/api', (_req, res) => res.json({ name: 'Yuki Music Backend', status: 'online', endpoints: ['/api/health','/api/home','/api/charts','/api/search','/api/suggest','/api/song','/api/next','/api/related','/api/browse','/api/resolve','/api/lyrics','/api/thumb'] }));
 
 app.get('/api/home', async (_req, res) => { try { res.json({ sections: await cached('home', 10 * 60 * 1000, home) }); } catch (e) { res.status(502).json({ error: e.message }); } });
@@ -44,8 +60,8 @@ app.get('/api/resolve', (req, res) => {
 
 function normLyricsText(value) { return String(value || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]+/g, ' ').trim(); }
 function similarity(a, b) { const x = normLyricsText(a), y = normLyricsText(b); if (!x || !y) return 0; if (x === y) return 1; if (x.includes(y) || y.includes(x)) return 0.9; const A = new Set(x.split(' ')), B = new Set(y.split(' ')); let common = 0; for (const word of A) if (B.has(word)) common++; return common / Math.max(A.size, B.size, 1); }
-async function lrclibGet(params) { const response = await fetch(`https://lrclib.net/api/get?${params.toString()}`, { headers: { accept: 'application/json', 'user-agent': 'Yuki-Music/0.3.0' } }); if (response.status === 404) return null; if (!response.ok) throw new Error(`LRCLIB ${response.status}`); return response.json(); }
-async function lrclibSearch(title, artist) { const q = [title, artist].filter(Boolean).join(' ').trim(); if (!q) return []; const response = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(q)}`, { headers: { accept: 'application/json', 'user-agent': 'Yuki-Music/0.3.0' } }); if (!response.ok) return []; const data = await response.json(); return Array.isArray(data) ? data : []; }
+async function lrclibGet(params) { const response = await fetch(`https://lrclib.net/api/get?${params.toString()}`, { headers: { accept: 'application/json', 'user-agent': 'Yuki-Music/0.3.1' } }); if (response.status === 404) return null; if (!response.ok) throw new Error(`LRCLIB ${response.status}`); return response.json(); }
+async function lrclibSearch(title, artist) { const q = [title, artist].filter(Boolean).join(' ').trim(); if (!q) return []; const response = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(q)}`, { headers: { accept: 'application/json', 'user-agent': 'Yuki-Music/0.3.1' } }); if (!response.ok) return []; const data = await response.json(); return Array.isArray(data) ? data : []; }
 
 app.get('/api/lyrics', async (req, res) => {
   const title = String(req.query.title || '').trim(); const artist = String(req.query.artist || '').trim(); const duration = Number(req.query.duration || 0); if (!title) return res.status(400).json({ error: 'title is required' });
