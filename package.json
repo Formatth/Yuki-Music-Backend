@@ -1,0 +1,17 @@
+{
+  "name": "yuki-music-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Yuki Music backend API, adapted from the upstream project architecture.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --check server.js"
+  },
+  "dependencies": {
+    "express": "^5.2.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
