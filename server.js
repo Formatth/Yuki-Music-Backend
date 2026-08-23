@@ -16,8 +16,8 @@ async function cached(key, ttl, fn) {
   return value;
 }
 
-app.get('/', (_req, res) => res.json({ name: 'Yuki Music Backend', status: 'online', version: '0.2.0' }));
-app.get('/api/health', (_req, res) => res.json({ ok: true, name: 'Yuki Music Backend', version: '0.2.0' }));
+app.get('/', (_req, res) => res.json({ name: 'Yuki Music Backend', status: 'online', version: '0.2.1' }));
+app.get('/api/health', (_req, res) => res.json({ ok: true, name: 'Yuki Music Backend', version: '0.2.1' }));
 app.get('/api', (_req, res) => res.json({ name: 'Yuki Music Backend', status: 'online', endpoints: ['/api/health','/api/home','/api/charts','/api/search','/api/suggest','/api/next','/api/related','/api/browse','/api/resolve','/api/lyrics','/api/thumb'] }));
 
 app.get('/api/home', async (_req, res) => { try { res.json({ sections: await cached('home', 10 * 60 * 1000, home) }); } catch (e) { res.status(502).json({ error: e.message }); } });
@@ -58,20 +58,62 @@ app.get('/api/resolve', (req, res) => {
   } catch { return res.status(400).json({ error: 'Invalid URL' }); }
 });
 
+function normLyricsText(value) {
+  return String(value || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]+/g, ' ').trim();
+}
+function similarity(a, b) {
+  const x = normLyricsText(a), y = normLyricsText(b);
+  if (!x || !y) return 0;
+  if (x === y) return 1;
+  if (x.includes(y) || y.includes(x)) return 0.9;
+  const A = new Set(x.split(' ')), B = new Set(y.split(' '));
+  let common = 0; for (const word of A) if (B.has(word)) common++;
+  return common / Math.max(A.size, B.size, 1);
+}
+
+async function lrclibGet(params) {
+  const response = await fetch(`https://lrclib.net/api/get?${params.toString()}`, { headers: { accept: 'application/json', 'user-agent': 'Yuki-Music/0.2.1' } });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`LRCLIB ${response.status}`);
+  return response.json();
+}
+
+async function lrclibSearch(title, artist) {
+  const q = [title, artist].filter(Boolean).join(' ').trim();
+  if (!q) return [];
+  const response = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(q)}`, { headers: { accept: 'application/json', 'user-agent': 'Yuki-Music/0.2.1' } });
+  if (!response.ok) return [];
+  const data = await response.json();
+  return Array.isArray(data) ? data : [];
+}
+
 app.get('/api/lyrics', async (req, res) => {
   const title = String(req.query.title || '').trim();
   const artist = String(req.query.artist || '').trim();
   const duration = Number(req.query.duration || 0);
   if (!title) return res.status(400).json({ error: 'title is required' });
   try {
-    const params = new URLSearchParams({ track_name: title, artist_name: artist });
-    if (duration > 0) params.set('duration', String(Math.round(duration)));
-    const response = await fetch(`https://lrclib.net/api/get?${params}`);
-    if (response.status === 404) return res.json({ synced: null, plain: null, source: 'lrclib' });
-    if (!response.ok) throw new Error(`LRCLIB ${response.status}`);
-    const data = await response.json();
-    res.json({ synced: data.syncedLyrics || null, plain: data.plainLyrics || null, source: 'lrclib', title: data.trackName || title, artist: data.artistName || artist });
-  } catch (e) { res.status(502).json({ error: e.message }); }
+    // First try LRCLIB's exact endpoint. Duration is only sent when it is a real value.
+    const exact = await lrclibGet(new URLSearchParams({ track_name: title, artist_name: artist, ...(duration > 0 ? { duration: String(Math.round(duration)) } : {}) }));
+    if (exact) return res.json({ synced: exact.syncedLyrics || null, plain: exact.plainLyrics || null, source: 'lrclib', title: exact.trackName || title, artist: exact.artistName || artist });
+
+    // LRCLIB can reject /get with 400 for imperfect metadata. Search is more tolerant,
+    // then we choose the closest title/artist/duration match instead of returning random lyrics.
+    const candidates = await lrclibSearch(title, artist);
+    const ranked = candidates.map(item => {
+      const titleScore = similarity(title, item.trackName);
+      const artistScore = artist ? similarity(artist, item.artistName) : 0.5;
+      const durationScore = duration > 0 && Number.isFinite(Number(item.duration)) ? Math.max(0, 1 - Math.abs(Number(item.duration) - duration) / 30) : 0.5;
+      return { item, score: titleScore * 0.55 + artistScore * 0.35 + durationScore * 0.10 };
+    }).sort((a, b) => b.score - a.score);
+    const best = ranked[0];
+    if (!best || best.score < 0.55) return res.json({ synced: null, plain: null, source: 'lrclib', match: null });
+
+    const item = best.item;
+    return res.json({ synced: item.syncedLyrics || null, plain: item.plainLyrics || null, source: 'lrclib-search', match: { score: Number(best.score.toFixed(3)), title: item.trackName || null, artist: item.artistName || null, duration: item.duration || null } });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
 });
 
 app.get('/api/thumb', (req, res) => {
