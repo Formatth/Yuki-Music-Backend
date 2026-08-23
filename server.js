@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const { Innertube } = require('youtubei.js');
 const { Readable } = require('stream');
 const { pipeline } = require('stream/promises');
 const { home, charts, search, suggest, next, related, browse, song } = require('./lib/ytm');
@@ -84,10 +85,14 @@ app.get('/api/thumb', (req, res) => { const id = String(req.query.videoId || '')
  * Replace this with your own authorized upstream resolver.
  */
 async function resolveUpstreamUrl(id) {
-  if (!id) throw new Error('stream id is required');
-  return 'https://dummy-url.com/audio.mp3';
+    const youtube = await Innertube.create();
+    const stream = await youtube.getStreamingData(id, { 
+        type: 'audio', // Ambil audio saja
+        quality: 'best',
+        format: 'mp4' 
+    });
+    return stream.url; // Mengembalikan URL googlevideo asli
 }
-
 /*
  * GET /stream/:id
  *
