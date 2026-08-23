@@ -84,14 +84,23 @@ app.get('/api/thumb', (req, res) => { const id = String(req.query.videoId || '')
  * Streaming proxy resolver stub.
  * Replace this with your own authorized upstream resolver.
  */
+// Taruh di luar fungsi agar bisa di-reuse (instance tunggal)
+let youtubeInstance;
+async function getYouTubeInstance() {
+    if (!youtubeInstance) {
+        youtubeInstance = await Innertube.create();
+    }
+    return youtubeInstance;
+}
+
 async function resolveUpstreamUrl(id) {
-    const youtube = await Innertube.create();
+    const youtube = await getYouTubeInstance();
     const stream = await youtube.getStreamingData(id, { 
-        type: 'audio', // Ambil audio saja
+        type: 'audio', 
         quality: 'best',
         format: 'mp4' 
     });
-    return stream.url; // Mengembalikan URL googlevideo asli
+    return stream.url; 
 }
 /*
  * GET /stream/:id
